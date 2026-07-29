@@ -2,10 +2,11 @@ __pycache__/
 *.pyc
 .venv/
 venv/
-dist/
-build/
-*.egg-info/
-*.ics
-.DS_Store
-.ruff_cache/
 .pytest_cache/
+.ruff_cache/
+.DS_Store
+
+# Never commit calendar files or captured responses - they hold real friends' names,
+# usernames and birthdays.
+*.ics
+*.bin
