@@ -29,11 +29,10 @@ classifiers = [
 # 1.49 is where `playwright install --no-shell` lands - see core.install_chromium.
 dependencies = ["playwright>=1.49"]
 
-# The source repository is private, so the sdist on PyPI is the source. No issue
-# tracker link for the same reason - there is nothing public to point at.
 [project.urls]
-Homepage = "https://pypi.org/project/snap-birthdays/"
-Source = "https://pypi.org/project/snap-birthdays/#files"
+Homepage = "https://github.com/jcthewizard/snap-birthdays"
+Source = "https://github.com/jcthewizard/snap-birthdays"
+Issues = "https://github.com/jcthewizard/snap-birthdays/issues"
 
 [project.scripts]
 snap-birthdays = "snap_birthdays.ui:main"

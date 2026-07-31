@@ -24,15 +24,10 @@ Calendar, tick the people you want, import. Your selection is remembered, so the
 run starts where you left off, and anyone who adds you on Snapchat later shows up
 already ticked.
 
-```
-  1  Connect Snapchat        564 friends, 427 share a birthday
-  2  Choose a calendar       [ Apple Calendar ]  [ Google Calendar ]
-  3  Pick who to include     search, All / None, grouped by month
-                                                   [ Add to calendar ]
-```
-
-<!-- No screenshot here on purpose: this file is also the PyPI description, and PyPI
-     will not render a relative image path. The real screenshot is docs/ui.png. -->
+<!-- Absolute URL, not a relative path: this file is also the PyPI description, and
+     PyPI will not render relative image paths. -->
+<img src="https://raw.githubusercontent.com/jcthewizard/snap-birthdays/main/docs/ui.png"
+     alt="The snap-birthdays window" width="620">
 
 Nothing leaves your machine. The page is served from `127.0.0.1` on a random port with a
 random token, and stops when you press Ctrl-C. Your Snapchat login happens in a real
@@ -115,15 +110,11 @@ actually want your calendar updated.
 asked. Keep the file to yourself — `~/.snap-birthdays/` is created readable only by you,
 and the `.ics` is written the same way.
 
-## The source, and the tests
-
-There is no public repository. The sdist on PyPI *is* the source — same files, tests
-included:
+## Tests
 
 ```bash
-pip download --no-binary :all: --no-deps snap-birthdays
-tar xf snap_birthdays-*.tar.gz && cd snap_birthdays-*
-uv sync --group dev && uv run pytest
+git clone https://github.com/jcthewizard/snap-birthdays
+cd snap-birthdays && uv sync --group dev && uv run pytest
 ```
 
 93 tests, no network and no browser — the protobuf decoder runs against synthetic
