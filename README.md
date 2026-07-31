@@ -13,7 +13,7 @@ one response as it goes past, and writes an `.ics` file.
 ## Run it
 
 ```bash
-uvx --from git+https://github.com/jcthewizard/snap-birthdays snap-birthdays
+uvx snap-birthdays
 ```
 
 That's the whole thing — no clone, no setup. It needs
@@ -25,11 +25,14 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 <details>
-<summary>Prefer pipx, or want the source?</summary>
+<summary>Prefer pipx, or want to run it from source?</summary>
 
 ```bash
 # pipx
-pipx run --spec git+https://github.com/jcthewizard/snap-birthdays snap-birthdays
+pipx run snap-birthdays
+
+# straight from this repo, skipping PyPI
+uvx --from git+https://github.com/jcthewizard/snap-birthdays snap-birthdays
 
 # or clone it
 git clone https://github.com/jcthewizard/snap-birthdays
@@ -42,7 +45,10 @@ Calendar, tick the people you want, import. Your selection is remembered, so the
 run starts where you left off, and anyone who adds you on Snapchat later shows up
 already ticked.
 
-<img src="docs/ui.png" alt="The snap-birthdays window" width="620">
+<!-- Absolute URL, not a relative path: this file is also the PyPI long description,
+     and PyPI does not resolve relative paths. Works on both. -->
+<img src="https://raw.githubusercontent.com/jcthewizard/snap-birthdays/main/docs/ui.png"
+     alt="The snap-birthdays window" width="620">
 
 Nothing leaves your machine. The page is served from `127.0.0.1` on a random port with a
 random token, and stops when you press Ctrl-C. Your Snapchat login happens in a real
@@ -56,15 +62,13 @@ terminal you started this from, not in the page.
 
 ### Or from the terminal
 
-There's a no-UI version that does the same thing in one shot. Same install, second
+There's a no-UI version that does the same thing in one shot — same package, second
 entry point:
 
 ```bash
-G=git+https://github.com/jcthewizard/snap-birthdays
-
-uvx --from $G snap-birthdays-cli               # fetch, then open Calendar (macOS)
-uvx --from $G snap-birthdays-cli --to google   # ...or open Google Calendar's import page
-uvx --from $G snap-birthdays-cli --to file     # ...or just write the .ics and stop
+uvx --from snap-birthdays snap-birthdays-cli               # fetch, open Calendar (macOS)
+uvx --from snap-birthdays snap-birthdays-cli --to google   # ...or Google's import page
+uvx --from snap-birthdays snap-birthdays-cli --to file     # ...or just write the .ics
 ```
 
 A browser window opens. Log in if it asks; after the first time the session is remembered,
