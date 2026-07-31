@@ -20,6 +20,22 @@ pip install playwright && playwright install chromium
 ## Use
 
 ```bash
+python ui.py
+```
+
+That's the whole thing: it opens a page in your browser with four steps — connect
+Snapchat, pick Apple or Google Calendar, tick the people you want, import. Your
+selection is remembered, so the next run starts where you left off, and anyone who
+adds you on Snapchat later shows up already ticked.
+
+<img src="docs/ui.png" alt="The snap-birthdays window" width="620">
+
+The server is local-only (`127.0.0.1`, random port, random token per run) and stops
+when you press Ctrl-C.
+
+### Or from the terminal
+
+```bash
 python snapbirthdays.py                 # fetch, then open the file in Calendar (macOS)
 python snapbirthdays.py --to google     # ...or open Google Calendar's import page
 python snapbirthdays.py --to file       # ...or just write the .ics and stop
@@ -83,11 +99,12 @@ actually want your calendar updated.
 ## Tests
 
 ```bash
-python3 -m pytest test_snapbirthdays.py
+python3 -m pytest
 ```
 
-50 tests, no network and no browser — the protobuf decoder runs against synthetic
-payloads, the calendar writer against hand-built friends.
+68 tests, no network and no browser — the protobuf decoder runs against synthetic
+payloads, the calendar writer against hand-built friends, and the UI's API surface
+against a real server on a random port.
 
 ## Credit
 

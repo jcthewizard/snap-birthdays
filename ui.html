@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>snap-birthdays</title>
+<style>
+  :root {
+    --bg: #ffffff; --panel: #fbfbfc; --text: #16171a; --muted: #71727a;
+    --line: #e4e4e8; --accent: #ffd400; --accent-text: #16171a;
+    --ok: #1a7f4b; --err: #c0392b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16171a; --panel: #1d1f23; --text: #f2f2f4; --muted: #9a9ba3;
+      --line: #2e3138; --ok: #4ade80; --err: #f87171;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 620px; margin: 0 auto; padding: 40px 24px 140px; }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin: 0 0 36px; }
+
+  .step { margin-bottom: 32px; }
+  .step-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+  .num {
+    width: 22px; height: 22px; border-radius: 50%; background: var(--line);
+    color: var(--muted); font-size: 12px; font-weight: 600; flex: none;
+    display: grid; place-items: center; align-self: center;
+  }
+  .step.done .num { background: var(--accent); color: var(--accent-text); }
+  h2 { font-size: 15px; font-weight: 600; margin: 0; }
+
+  button {
+    font: inherit; font-weight: 500; border-radius: 9px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--text); padding: 9px 16px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--muted); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.primary {
+    background: var(--accent); color: var(--accent-text); border-color: transparent;
+    font-weight: 600;
+  }
+
+  .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .choice {
+    border: 1px solid var(--line); border-radius: 11px; padding: 14px;
+    cursor: pointer; background: var(--panel);
+  }
+  .choice:hover { border-color: var(--muted); }
+  .choice.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .choice b { display: block; font-size: 14px; font-weight: 600; }
+  .choice span { color: var(--muted); font-size: 13px; }
+  .choice input { display: none; }
+
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+  input[type=search] {
+    flex: 1; font: inherit; padding: 9px 12px; border-radius: 9px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  }
+  .toolbar button { padding: 9px 12px; font-size: 13px; }
+
+  .list {
+    border: 1px solid var(--line); border-radius: 11px; overflow: hidden auto;
+    max-height: 420px; background: var(--panel);
+  }
+  .month {
+    position: sticky; top: 0; background: var(--panel); color: var(--muted);
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 9px 14px; border-bottom: 1px solid var(--line);
+  }
+  .row {
+    display: flex; align-items: center; gap: 11px; padding: 9px 14px;
+    border-bottom: 1px solid var(--line); cursor: pointer;
+  }
+  .row:last-child { border-bottom: none; }
+  .row:hover { background: var(--bg); }
+  .row input { width: 16px; height: 16px; accent-color: var(--accent); flex: none; }
+  .row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+             white-space: nowrap; }
+  .row .un { color: var(--muted); font-size: 12px; }
+  .row .dt { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+
+  .count { color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .note { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
+  .empty { padding: 28px; text-align: center; color: var(--muted); }
+
+  footer {
+    position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg);
+    border-top: 1px solid var(--line); padding: 14px 24px;
+  }
+  .footer-in {
+    max-width: 620px; margin: 0 auto; display: flex; align-items: center; gap: 14px;
+  }
+  .footer-in .msg { flex: 1; font-size: 13px; color: var(--muted); }
+  .msg.ok { color: var(--ok); } .msg.err { color: var(--err); }
+
+  .spin {
+    width: 14px; height: 14px; border: 2px solid var(--line);
+    border-top-color: var(--muted); border-radius: 50%; display: inline-block;
+    vertical-align: -2px; animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .hide { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>snap-birthdays</h1>
+  <p class="sub">Your Snapchat friends' birthdays, in your calendar.</p>
+
+  <section class="step" id="s1">
+    <div class="step-head"><span class="num">1</span><h2>Connect Snapchat</h2></div>
+    <button id="connect" class="primary">Connect Snapchat</button>
+    <p class="note" id="connectNote">
+      A browser window opens. Log in if it asks, then leave it — it closes by itself.
+    </p>
+  </section>
+
+  <section class="step hide" id="s2">
+    <div class="step-head"><span class="num">2</span><h2>Choose a calendar</h2></div>
+    <div class="choices">
+      <label class="choice sel" id="c-apple">
+        <input type="radio" name="target" value="apple" checked>
+        <b>Apple Calendar</b><span>Opens Calendar to import</span>
+      </label>
+      <label class="choice" id="c-google">
+        <input type="radio" name="target" value="google">
+        <b>Google Calendar</b><span>Downloads a file to import</span>
+      </label>
+    </div>
+  </section>
+
+  <section class="step hide" id="s3">
+    <div class="step-head"><span class="num">3</span><h2>Pick who to include</h2></div>
+    <div class="toolbar">
+      <input type="search" id="search" placeholder="Search names…" autocomplete="off">
+      <button id="all">All</button>
+      <button id="none">None</button>
+    </div>
+    <div class="list" id="list"></div>
+    <p class="note">
+      Unticking someone leaves them out of the next import. It can't remove a birthday
+      you already added — delete that one in your calendar app.
+    </p>
+  </section>
+</main>
+
+<footer class="hide" id="foot">
+  <div class="footer-in">
+    <span class="count" id="count"></span>
+    <span class="msg" id="msg"></span>
+    <button id="import" class="primary">Add to calendar</button>
+  </div>
+</footer>
+
+<script>
+const TOKEN = "__TOKEN__";
+const api = (path, opts) => fetch(path + (path.includes("?") ? "&" : "?") + "token=" + TOKEN, opts);
+const $ = id => document.getElementById(id);
+
+let friends = [];
+let isMac = true;
+
+function setMsg(text, kind) {
+  const el = $("msg");
+  el.className = "msg" + (kind ? " " + kind : "");
+  el.innerHTML = text;
+}
+
+function render() {
+  const q = $("search").value.trim().toLowerCase();
+  const shown = friends.filter(f =>
+    !q || f.name.toLowerCase().includes(q) || f.username.toLowerCase().includes(q));
+
+  const list = $("list");
+  list.innerHTML = "";
+  if (!shown.length) {
+    list.innerHTML = '<div class="empty">No one matches that.</div>';
+  } else {
+    let month = null;
+    for (const f of shown) {
+      if (f.monthName !== month) {
+        month = f.monthName;
+        const h = document.createElement("div");
+        h.className = "month";
+        h.textContent = month;
+        list.appendChild(h);
+      }
+      const row = document.createElement("label");
+      row.className = "row";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = f.selected;
+      box.onchange = () => { f.selected = box.checked; updateCount(); };
+      const nm = document.createElement("span");
+      nm.className = "nm";
+      nm.textContent = f.name;
+      if (f.name !== f.username) {
+        const un = document.createElement("span");
+        un.className = "un";
+        un.textContent = "  " + f.username;
+        nm.appendChild(un);
+      }
+      const dt = document.createElement("span");
+      dt.className = "dt";
+      dt.textContent = f.monthName.slice(0, 3) + " " + f.day;
+      row.append(box, nm, dt);
+      list.appendChild(row);
+    }
+  }
+  updateCount();
+}
+
+function updateCount() {
+  const n = friends.filter(f => f.selected).length;
+  $("count").textContent = `${n} of ${friends.length} selected`;
+  $("import").disabled = n === 0;
+}
+
+function show(state) {
+  friends = state.friends || [];
+  isMac = state.isMac;
+  if (!isMac) {
+    $("c-apple").classList.add("hide");
+    $("c-google").classList.add("sel");
+    document.querySelector('input[value="google"]').checked = true;
+  }
+  // No fetch has ever happened, so leave step 1 exactly as it started.
+  if (!state.fetchedAt && !friends.length) return;
+
+  $("s1").classList.add("done");
+  $("connect").textContent = "Refresh from Snapchat";
+  $("connect").classList.remove("primary");
+  $("connectNote").textContent = friends.length
+    ? `${state.totalFriends} friends, ${friends.length} share a birthday` +
+      (state.fetchedAt ? ` · last checked ${state.fetchedAt}` : "")
+    : `${state.totalFriends} friends, but none of them share a birthday. ` +
+      `Open the Chat tab in Snapchat, then refresh.`;
+  if (!friends.length) return;  // nothing to pick, so steps 2 and 3 stay hidden
+
+  for (const id of ["s2", "s3", "foot"]) $(id).classList.remove("hide");
+  render();
+}
+
+$("connect").onclick = async () => {
+  $("connect").disabled = true;
+  $("connectNote").innerHTML =
+    '<span class="spin"></span> Waiting for Snapchat — finish logging in if it asks.';
+  try {
+    const res = await api("/api/connect", { method: "POST", body: "{}" });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    show(data);
+    setMsg(`Found ${data.friends.length} birthdays.`, "ok");
+  } catch (err) {
+    $("connectNote").textContent = "Couldn't reach Snapchat: " + err.message;
+  } finally {
+    $("connect").disabled = false;
+  }
+};
+
+$("search").oninput = render;
+// All/None act on what you can currently see, so searching then hitting All is a
+// predictable way to pick a subset.
+$("all").onclick = () => setVisible(true);
+$("none").onclick = () => setVisible(false);
+function setVisible(value) {
+  const q = $("search").value.trim().toLowerCase();
+  for (const f of friends) {
+    if (!q || f.name.toLowerCase().includes(q) || f.username.toLowerCase().includes(q)) {
+      f.selected = value;
+    }
+  }
+  render();
+}
+
+for (const el of document.querySelectorAll(".choice")) {
+  el.onclick = () => {
+    document.querySelectorAll(".choice").forEach(c => c.classList.remove("sel"));
+    el.classList.add("sel");
+  };
+}
+
+$("import").onclick = async () => {
+  const target = document.querySelector('input[name=target]:checked').value;
+  const selected = friends.filter(f => f.selected).map(f => f.username);
+  $("import").disabled = true;
+  setMsg('<span class="spin"></span> Building calendar…');
+  try {
+    const res = await api("/api/import", {
+      method: "POST",
+      body: JSON.stringify({ selected, target, calname: "Snapchat Birthdays" }),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    if (data.download) {
+      window.location = data.download + "&t=" + Date.now();
+      setMsg(`${data.count} birthdays downloaded — drag the file into Google Calendar's ` +
+             `import box (it just opened).`, "ok");
+    } else {
+      setMsg(`${data.count} birthdays sent to Calendar. Import into the same calendar ` +
+             `each time — re-importing updates events, never duplicates them.`, "ok");
+    }
+  } catch (err) {
+    setMsg("Failed: " + err.message, "err");
+  } finally {
+    updateCount();  // not plain `disabled = false`: the selection may be empty now
+  }
+};
+
+api("/api/state").then(r => r.json()).then(state => {
+  if (state.error) $("connectNote").textContent = state.error;
+  else show(state);
+}).catch(() => {});
+</script>
+</body>
+</html>
