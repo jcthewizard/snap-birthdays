@@ -1,19 +1,22 @@
-"""Tests for snapbirthdays.
+"""Tests for snap_birthdays.core.
 
-Run with: python3 -m pytest test_snapbirthdays.py
+Run with: uv run pytest
 
 No network and no browser: the protobuf decoder is exercised against payloads built by
-the tiny encoder below, and the ICS writer against hand-built friend dicts.
+the tiny encoder below, the ICS writer against hand-built friend dicts, and the browser
+launch against a stub, since that is the whole surface _launch touches.
 """
 
 from __future__ import annotations
 
+import os
 import re
+import sys
 from datetime import date
 
 import pytest
 
-from snapbirthdays import (
+from snap_birthdays.core import (
     _escape,
     _fold,
     _uid,
@@ -178,6 +181,18 @@ def test_decodes_base64_wrapped_payload():
 # --------------------------------------------------------------------------------------
 
 
+def test_uid_literal_is_frozen():
+    """The one value in this file that must never be "fixed" to match new code.
+
+    Once a release ships, this exact string is what sits in strangers' calendars, and it
+    is the only thing that lets an import update an event instead of adding a second one.
+    Change the prefix, the hash, the truncation or the suffix and every existing user
+    silently gets a duplicate copy of all 400 birthdays on their next import. If this
+    test fails, the code is wrong, not the constant.
+    """
+    assert _uid("janedoe22") == "snap-3dd7ed2fcec6f1a5feb2@snap-birthdays"
+
+
 def test_uid_is_deterministic():
     assert _uid("janedoe22") == _uid("janedoe22")
 
@@ -304,3 +319,268 @@ def test_special_characters_in_a_name_do_not_break_the_file():
     assert summaries[0] == "SUMMARY:Doe\\, Jane\\; \\\\the 3rd\\\\'s Birthday"
     # A stray unescaped comma would split the value into two -- make sure it did not.
     assert unfold(ics).count("BEGIN:VEVENT") == 1
+
+
+# --------------------------------------------------------------------------------------
+# Cross-platform delivery
+#
+# These matter because the package is installed by strangers on machines that are not a
+# Mac. `open` is macOS-only and raises FileNotFoundError even with check=False, so the
+# Google path used to crash outright on Linux and Windows.
+# --------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux", "win32"])
+def test_google_delivery_works_on_every_platform(platform, monkeypatch, tmp_path, capsys):
+    from snap_birthdays import core
+
+    monkeypatch.setattr(core.sys, "platform", platform)
+    monkeypatch.setattr(core.webbrowser, "open", lambda url: True)
+    monkeypatch.setattr(core.subprocess, "run", lambda *a, **k: None)
+
+    core.deliver(tmp_path / "b.ics", "google")  # must not raise
+    assert "import page is open" in capsys.readouterr().out
+
+
+def test_reveal_survives_a_missing_file_manager(monkeypatch, tmp_path):
+    """A headless Linux box has no xdg-open; that must not take the whole run down."""
+    from snap_birthdays import core
+
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("xdg-open")
+
+    monkeypatch.setattr(core.sys, "platform", "linux")
+    monkeypatch.setattr(core.subprocess, "run", missing)
+    core.reveal(tmp_path / "b.ics")  # must not raise
+
+
+def test_apple_delivery_declines_politely_off_mac(monkeypatch, tmp_path, capsys):
+    from snap_birthdays import core
+
+    monkeypatch.setattr(core.sys, "platform", "linux")
+    called = []
+    monkeypatch.setattr(core.subprocess, "run", lambda *a, **k: called.append(a))
+
+    core.deliver(tmp_path / "b.ics", "apple")
+    out = capsys.readouterr().out
+    assert "macOS only" in out and "--to google" in out
+    assert not called, "must not shell out to a macOS-only binary"
+
+
+# --------------------------------------------------------------------------------------
+# Launching a browser
+#
+# The failure a stranger actually hits is not a bug in the decoder, it is "the browser
+# would not start". None of this needs a browser: _launch only ever touches
+# playwright.chromium.launch_persistent_context, so a stub is the whole surface.
+# --------------------------------------------------------------------------------------
+
+MISSING_BROWSER = (
+    "BrowserType.launch_persistent_context: Executable doesn't exist at "
+    "/root/.cache/ms-playwright/chromium-1181/chrome-linux/chrome\n"
+    "Looks like Playwright was just installed or updated.\n"
+    "Please run the following command to download new browsers:\n"
+    "    playwright install\n"
+)
+PROFILE_IN_USE = (
+    "BrowserType.launch_persistent_context: Failed to create a ProcessSingleton for your "
+    "profile directory. This usually means that the profile is already in use by another "
+    "instance of Chromium.\nCall log:\n  - <launching> chrome\n"
+)
+NO_DISPLAY = (
+    "BrowserType.launch_persistent_context: Target page, context or browser has been "
+    "closed\nBrowser logs:\n[pid=4711][err] [ERROR:ozone_platform_x11.cc(245)] Missing X "
+    "server or $DISPLAY\nCall log:\n  - <launching> chrome\n"
+)
+
+
+class FakePlaywright:
+    """Records every launch and replays a scripted outcome for each."""
+
+    def __init__(self, *outcomes):
+        self.outcomes = list(outcomes)
+        self.calls = []
+        self.chromium = self
+
+    async def launch_persistent_context(self, **kwargs):
+        self.calls.append(kwargs.get("channel", "bundled"))
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+@pytest.fixture
+def launcher(tmp_path, monkeypatch):
+    """Keep _launch off the real ~/.snap-birthdays."""
+    from snap_birthdays import core
+
+    monkeypatch.setattr(core, "HOME", tmp_path / "home")
+    monkeypatch.setattr(core, "PROFILE_DIR", tmp_path / "home" / "chrome-profile")
+    installs = []
+    monkeypatch.setattr(core, "install_chromium", lambda: installs.append(1))
+    return installs
+
+
+def launch(playwright):
+    import asyncio as _asyncio
+
+    from snap_birthdays import core
+
+    return _asyncio.run(core._launch(playwright))
+
+
+@pytest.mark.parametrize("message,expected", [
+    (MISSING_BROWSER, True),
+    (PROFILE_IN_USE, False),
+    (NO_DISPLAY, False),
+    ("Timeout 1ms exceeded.", False),
+])
+def test_only_a_missing_browser_looks_like_a_missing_browser(message, expected):
+    from snap_birthdays import core
+
+    assert core.is_missing_browser(Exception(message)) is expected
+
+
+def test_a_missing_browser_is_downloaded_once_then_retried(launcher):
+    playwright = FakePlaywright(Exception("no chrome channel"), Exception(MISSING_BROWSER), "ctx")
+    assert launch(playwright) == "ctx"
+    assert launcher == [1], "the one case worth a 170MB download"
+    assert playwright.calls == ["chrome", "bundled", "bundled"]
+
+
+@pytest.mark.parametrize("message,phrase", [
+    (PROFILE_IN_USE, "already open"),
+    (NO_DISPLAY, "No screen"),
+])
+def test_other_launch_failures_do_not_trigger_a_download(launcher, message, phrase):
+    """A quarter-gigabyte download cannot fix a locked profile or a missing display."""
+    playwright = FakePlaywright(Exception("no chrome channel"), Exception(message))
+
+    with pytest.raises(SystemExit) as caught:
+        launch(playwright)
+
+    assert launcher == [], "must not download"
+    assert playwright.calls == ["chrome", "bundled"], "must not relaunch"
+    assert phrase in str(caught.value)
+
+
+def test_a_failure_after_the_download_is_still_a_sentence(launcher):
+    """No raw Playwright blob escapes, even on the retry."""
+    playwright = FakePlaywright(
+        Exception("no chrome channel"), Exception(MISSING_BROWSER), Exception(NO_DISPLAY))
+
+    with pytest.raises(SystemExit) as caught:
+        launch(playwright)
+
+    assert launcher == [1]
+    message = str(caught.value)
+    assert message.startswith("No screen")
+    assert "Call log" not in message, "the browser log belongs in a bug report, not here"
+
+
+class _Result:
+    def __init__(self, returncode):
+        self.returncode = returncode
+
+
+def test_the_download_skips_the_headless_shell(monkeypatch, capsys):
+    """This tool is always headed, so the headless shell is ~100MB it can never use."""
+    from snap_birthdays import core
+
+    seen = []
+    monkeypatch.setattr(core.subprocess, "run",
+                        lambda cmd, **kw: seen.append(cmd) or _Result(0))
+    core.install_chromium()
+
+    assert seen[0][-3:] == ["install", "--no-shell", "chromium"]
+    assert "150MB" not in capsys.readouterr().err, "the old figure was ~3x low"
+
+def test_a_failed_download_says_what_to_run(monkeypatch):
+    from snap_birthdays import core
+
+    monkeypatch.setattr(core.subprocess, "run", lambda cmd, **kw: _Result(1))
+    with pytest.raises(SystemExit) as caught:
+        core.install_chromium()
+    assert "--no-shell chromium" in str(caught.value)
+
+
+def test_the_cli_reports_a_browser_failure_without_a_traceback(monkeypatch, capsys, tmp_path):
+    """`snap-birthdays-cli` is a documented entry point; it must not end in asyncio frames."""
+    from snap_birthdays import core
+
+    async def closed(*args, **kwargs):
+        raise RuntimeError("Page.wait_for_timeout: Target page has been closed\nCall log:\n  - x")
+
+    monkeypatch.setattr(core, "fetch_friends", closed)
+    code = core.main(["--to", "file", "--out", str(tmp_path / "b.ics")])
+
+    err = capsys.readouterr().err
+    assert code == 1
+    assert err.strip() == "Page.wait_for_timeout: Target page has been closed"
+
+
+# --------------------------------------------------------------------------------------
+# File permissions
+#
+# The .ics and the friend cache are several hundred other people's names and birthdays.
+# At the default umask they would land 0644 in a 0755 directory - readable by every other
+# account on the machine.
+# --------------------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+def test_written_files_are_readable_only_by_this_user(tmp_path, monkeypatch):
+    from snap_birthdays import core
+
+    monkeypatch.setattr(core, "HOME", tmp_path / "home")
+    old = os.umask(0o022)
+    try:
+        core.write_private(tmp_path / "home" / "sub" / "b.ics", "x")
+    finally:
+        os.umask(old)
+
+    assert (tmp_path / "home" / "sub" / "b.ics").stat().st_mode & 0o777 == 0o600
+    assert (tmp_path / "home").stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+def test_an_existing_open_home_is_tightened(tmp_path, monkeypatch):
+    """An earlier version left it 0755; the next run should not leave it that way."""
+    from snap_birthdays import core
+
+    home = tmp_path / "home"
+    home.mkdir(mode=0o755)
+    monkeypatch.setattr(core, "HOME", home)
+    core.write_private(home / "friends.json", "{}")
+
+    assert home.stat().st_mode & 0o777 == 0o700
+
+
+def test_a_stale_temp_file_does_not_leak_its_mode(tmp_path, monkeypatch):
+    from snap_birthdays import core
+
+    monkeypatch.setattr(core, "HOME", tmp_path / "home")
+    target = tmp_path / "out.ics"
+    stale = tmp_path / "out.ics.tmp"
+    stale.write_text("old")
+    os.chmod(stale, 0o666)
+
+    core.write_private(target, "new")
+    assert target.read_text() == "new"
+    if sys.platform != "win32":
+        assert target.stat().st_mode & 0o777 == 0o600
+
+
+def test_the_cli_writes_the_ics_privately(tmp_path, monkeypatch):
+    from snap_birthdays import core
+
+    payload = sync_response([("janedoe22", "Jane", 3, 14)])
+    source = tmp_path / "payload.bin"
+    source.write_bytes(payload)
+    out = tmp_path / "nested" / "b.ics"
+
+    assert core.main(["--from-file", str(source), "--to", "file", "--out", str(out)]) == 0
+    assert "BEGIN:VEVENT" in out.read_text(encoding="utf-8")
+    if sys.platform != "win32":
+        assert out.stat().st_mode & 0o777 == 0o600

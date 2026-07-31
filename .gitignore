@@ -6,6 +6,11 @@ venv/
 .ruff_cache/
 .DS_Store
 
+# Build artifacts. Published to PyPI, never committed.
+dist/
+build/
+*.egg-info/
+
 # Never commit calendar files or captured responses - they hold real friends' names,
 # usernames and birthdays.
 *.ics

@@ -87,6 +87,8 @@
 
   .count { color: var(--muted); font-size: 13px; white-space: nowrap; }
   .note { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
+  /* Errors arrive as a sentence plus a detail line; without this they run together. */
+  .note.wrap { white-space: pre-line; }
   .empty { padding: 28px; text-align: center; color: var(--muted); }
 
   footer {
@@ -118,6 +120,8 @@
     <button id="connect" class="primary">Connect Snapchat</button>
     <p class="note" id="connectNote">
       A browser window opens. Log in if it asks, then leave it — it closes by itself.
+      If you don't have Google Chrome, the first run downloads a browser first
+      (~170MB); the terminal you started this from shows the progress.
     </p>
   </section>
 
@@ -234,6 +238,7 @@ function show(state) {
   if (!state.fetchedAt && !friends.length) return;
 
   $("s1").classList.add("done");
+  $("connectNote").classList.remove("wrap");
   $("connect").textContent = "Refresh from Snapchat";
   $("connect").classList.remove("primary");
   $("connectNote").textContent = friends.length
@@ -249,8 +254,13 @@ function show(state) {
 
 $("connect").onclick = async () => {
   $("connect").disabled = true;
+  $("connectNote").classList.remove("wrap");
+  // Honest about the wait: on a machine with no Chrome the first thing that happens is
+  // a ~170MB download, and until it finishes there is no window to log in to.
   $("connectNote").innerHTML =
-    '<span class="spin"></span> Waiting for Snapchat — finish logging in if it asks.';
+    '<span class="spin"></span> Starting a browser — log in there if it asks, then ' +
+    'leave it alone. The first run may spend a few minutes downloading a browser ' +
+    'before the window appears; the terminal shows the progress.';
   try {
     const res = await api("/api/connect", { method: "POST", body: "{}" });
     const data = await res.json();
@@ -258,7 +268,8 @@ $("connect").onclick = async () => {
     show(data);
     setMsg(`Found ${data.friends.length} birthdays.`, "ok");
   } catch (err) {
-    $("connectNote").textContent = "Couldn't reach Snapchat: " + err.message;
+    $("connectNote").classList.add("wrap");
+    $("connectNote").textContent = err.message;
   } finally {
     $("connect").disabled = false;
   }

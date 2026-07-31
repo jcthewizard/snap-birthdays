@@ -1,6 +1,6 @@
 """Tests for the local web UI.
 
-Run with: python3 -m pytest test_ui.py
+Run with: python3 -m pytest
 
 No browser: the handler is served on a random loopback port and driven with http.client,
 which is the whole API surface the page uses.
@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import http.client
 import json
+import sys
 import threading
 from http.server import ThreadingHTTPServer
 
 import pytest
 
-import snapbirthdays as core
-import ui
+from snap_birthdays import core
+from snap_birthdays import ui
 
 FRIENDS = [
     {"username": "alice", "name": "Alice", "month": 3, "day": 4},
@@ -87,17 +88,32 @@ def test_bad_token_is_a_403_not_a_dropped_connection(server, query):
 def test_page_is_only_served_to_loopback(server):
     port = server.server_address[1]
 
-    status, text = call(server, "GET", "/", headers={"Host": f"127.0.0.1:{port}"})
+    status, text = call(server, "GET", f"/?token={ui.TOKEN}",
+                        headers={"Host": f"127.0.0.1:{port}"})
     assert status == 200 and ui.TOKEN in text
 
     # A hostname re-pointed at 127.0.0.1 must not be able to read the token back out.
-    status, text = call(server, "GET", "/", headers={"Host": f"evil.example.com:{port}"})
+    status, text = call(server, "GET", f"/?token={ui.TOKEN}",
+                        headers={"Host": f"evil.example.com:{port}"})
     assert status == 403
     assert ui.TOKEN not in text
 
     status, text = call(server, "GET", f"/api/state?token={ui.TOKEN}",
                         headers={"Host": "evil.example.com"})
     assert status == 403
+
+
+@pytest.mark.parametrize("path", ["/", "/?token=wrong", "/?token="])
+def test_the_page_does_not_hand_out_the_token_it_guards(server, path):
+    """Any other local process can reach this port; only the URL we opened has the token.
+
+    Serving the page unauthenticated would let it read the token out of the HTML and then
+    read every friend's name and birthday from /api/state.
+    """
+    status, text = call(server, "GET", path)
+    assert status == 403
+    assert ui.TOKEN not in text
+    assert "terminal" in text, "tell a lost user where the real link is"
 
 
 def test_unparsable_content_length_is_a_400(server):
@@ -243,3 +259,15 @@ def test_unknown_route(server):
     assert status == 404
     status, data = api(server, "GET", "/api/nope")
     assert status == 404
+
+
+# -- what the files are readable by ---------------------------------------------------
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+def test_cache_and_ics_are_not_world_readable(server, home):
+    """Several hundred other people's birthdays; not for every account on the machine."""
+    api(server, "POST", "/api/import", {"selected": ["alice"], "target": "google"})
+
+    assert ui.CACHE.stat().st_mode & 0o077 == 0
+    assert core.DEFAULT_ICS.stat().st_mode & 0o077 == 0

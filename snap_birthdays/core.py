@@ -7,9 +7,11 @@ a real browser, let you log in by hand, read that one response as it goes past, 
 it into an .ics file.
 
 Usage:
-    python snapbirthdays.py                 # fetch, write .ics, open it in Calendar
-    python snapbirthdays.py --to google     # ...or open Google Calendar's import page
-    python snapbirthdays.py --to file       # ...or just write the file and stop
+    snap-birthdays-cli                 # fetch, write .ics, open it in Calendar
+    snap-birthdays-cli --to google     # ...or open Google Calendar's import page
+    snap-birthdays-cli --to file       # ...or just write the file and stop
+
+(`snap-birthdays` with no `-cli` opens the local web UI instead - see ui.py.)
 
 The protobuf decoding is adapted from Snap2Calendar-Birthday-Export
 (MIT, Copyright (c) 2023 James Arnott)
@@ -26,6 +28,7 @@ import os
 import re
 import subprocess
 import sys
+import webbrowser
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -221,6 +224,39 @@ def _log(message: str) -> None:
     print(f"  {message}", file=sys.stderr, flush=True)
 
 
+def make_home() -> None:
+    """Create ``~/.snap-birthdays`` where only this user can read it.
+
+    It holds a logged-in Snapchat browser profile and several hundred other people's
+    birthdays. At the default umask it would be 0755 - readable by every other account
+    on the machine - so tighten it, including one an earlier version already made.
+    """
+    HOME.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(HOME, 0o700)
+    except OSError:
+        pass  # someone else's directory, or a filesystem without modes
+
+
+def write_private(path: Path, text: str) -> None:
+    """Write ``text`` atomically, in a file only this user can read.
+
+    Same reasoning as ``make_home`` for the mode. Atomic because a plain write truncates
+    first, so a crash or a concurrent read during it leaves a half-written file, and
+    renaming over the old one never does.
+    """
+    if HOME in path.parents:
+        make_home()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    tmp = path.with_name(path.name + ".tmp")
+    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w",
+              encoding="utf-8") as handle:
+        handle.write(text)
+    os.chmod(tmp, 0o600)  # O_CREAT's mode is ignored if a stale temp file was there
+    os.replace(tmp, path)
+
+
 def _clear_stale_locks() -> None:
     """Remove a Chrome singleton lock left behind by a crashed run.
 
@@ -250,6 +286,7 @@ async def _launch(playwright):
     Always headed: Snapchat's web app does not issue the friend sync in a headless
     browser, so there is nothing to capture. Verified - headless waits forever.
     """
+    make_home()
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     _clear_stale_locks()
     kwargs = {
@@ -264,10 +301,81 @@ async def _launch(playwright):
     try:
         context = await playwright.chromium.launch_persistent_context(channel="chrome", **kwargs)
         _log("using installed Google Chrome")
+        return context
     except Exception:
+        pass
+    try:
         context = await playwright.chromium.launch_persistent_context(**kwargs)
-        _log("using bundled Chromium")
+    except Exception as exc:
+        # Installing the package does not install a browser, so on a fresh machine with
+        # no Chrome this is the first thing that fails. Only a *missing* browser is worth
+        # a download, though: every other failure here (no display, profile still open,
+        # sandbox denied) would survive one and cost the user a few hundred MB first.
+        if not is_missing_browser(exc):
+            raise launch_failed(exc) from None
+        install_chromium()
+        try:
+            context = await playwright.chromium.launch_persistent_context(**kwargs)
+        except Exception as retry:
+            raise launch_failed(retry) from None
+    _log("using bundled Chromium")
     return context
+
+
+def is_missing_browser(exc: Exception) -> bool:
+    """True only for "the browser was never downloaded".
+
+    Playwright reports that as "Executable doesn't exist at ..." plus an instruction to
+    run `playwright install`. Anything else that stops a launch is a different problem,
+    and answering it with a download is both slow and useless.
+    """
+    text = str(exc).lower()
+    return "executable doesn't exist" in text or "playwright install" in text
+
+
+def launch_failed(exc: Exception) -> SystemExit:
+    """Turn a Playwright launch failure into one sentence a stranger can act on.
+
+    Playwright's own message is a multi-screen blob of browser logs and a call log. It
+    is the right thing for a bug report and the wrong thing for someone who just ran one
+    command, so keep the first line and lead with what to do about it.
+    """
+    text = str(exc)
+    detail = next((line.strip() for line in text.splitlines() if line.strip()),
+                  exc.__class__.__name__)
+    lowered = text.lower()
+    if "processsingleton" in lowered or "already in use" in lowered:
+        hint = (f"That browser profile is already open.\n"
+                f"Close the Snapchat window this opened before, then try again. "
+                f"(Profile: {PROFILE_DIR})")
+    elif "x server" in lowered or "$display" in lowered:
+        hint = ("No screen to open a browser on.\n"
+                "Snapchat only sends the friend list to a visible window, so this needs a "
+                "real desktop session - not a plain SSH login or a headless server.")
+    else:
+        hint = "Could not start a browser."
+    return SystemExit(f"{hint}\n\n{detail}")
+
+
+def install_chromium() -> None:
+    """Download Playwright's Chromium, showing progress, then carry on.
+
+    ``--no-shell`` skips the headless shell build: this tool is always headed (see
+    ``_launch``), so that is ~100MB of download and ~200MB of disk it could never use.
+    """
+    print("\n  First run: downloading a browser for Playwright"
+          " (~170MB download, ~350MB on disk, once)…", file=sys.stderr, flush=True)
+    result = subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "--no-shell", "chromium"],
+        check=False,
+    )
+    if result.returncode != 0:
+        raise SystemExit(
+            "Could not download the browser Playwright needs.\n"
+            f"Run this by hand, then try again:\n\n    {sys.executable} -m playwright "
+            "install --no-shell chromium\n"
+        )
+    print("  Done.\n", file=sys.stderr, flush=True)
 
 
 async def fetch_friends(timeout: float = 300.0) -> list[dict]:
@@ -307,7 +415,17 @@ async def fetch_friends(timeout: float = 300.0) -> list[dict]:
 
             deadline = asyncio.get_event_loop().time() + timeout
             while not bodies and asyncio.get_event_loop().time() < deadline:
-                await page.wait_for_timeout(2000)
+                try:
+                    await page.wait_for_timeout(2000)
+                except Exception:
+                    # Closing the window mid-wait is an ordinary thing to do, and it
+                    # raises out of here; a traceback would be the wrong answer to it.
+                    if bodies:
+                        break
+                    raise SystemExit(
+                        "The browser window closed before Snapchat sent your friends.\n"
+                        "Run this again and leave the window alone - it closes itself."
+                    ) from None
 
             if not bodies:
                 raise SystemExit(
@@ -422,20 +540,40 @@ def build_ics(friends: list[dict], calname: str = "Snapchat Birthdays",
 # --------------------------------------------------------------------------------------
 
 
+def reveal(path: Path) -> None:
+    """Show ``path`` in the OS file manager, if this OS has one we know how to ask.
+
+    Best effort by definition: on a headless Linux box there may be no file manager at
+    all. The caller always prints the path too, so failing here costs nothing.
+    """
+    commands = {
+        "darwin": ["open", "-R", str(path)],
+        "win32": ["explorer", "/select,", str(path)],
+    }
+    command = commands.get(sys.platform, ["xdg-open", str(path.parent)])
+    try:
+        subprocess.run(command, check=False)
+    except (OSError, ValueError):
+        pass  # no such tool on this machine; the printed path is the fallback
+
+
 def deliver(path: Path, target: str) -> None:
     """Hand the .ics file off to the user's calendar."""
     if target == "apple":
         if sys.platform != "darwin":
-            print("--to apple only works on macOS; the file is written above.")
+            print("Apple Calendar is macOS only - the file is written above.")
+            print("Import it into whatever calendar app you use, or re-run with --to google.")
             return
         subprocess.run(["open", "-a", "Calendar", str(path)], check=True)
         print("\nCalendar will ask which calendar to add these to.")
         print("Pick or create a dedicated one - then you can hide or delete it in one go.")
     elif target == "google":
-        subprocess.run(["open", GOOGLE_IMPORT_URL], check=False)
-        subprocess.run(["open", "-R", str(path)], check=False)  # reveal in Finder
-        print("\nGoogle Calendar's import page is open, and the .ics is selected in Finder.")
-        print(f'Drag it into "Import" (or browse to {path}), pick a calendar, hit Import.')
+        # webbrowser rather than `open`: `open` is macOS-only and raises FileNotFoundError
+        # on Linux and Windows even with check=False.
+        webbrowser.open(GOOGLE_IMPORT_URL)
+        reveal(path)
+        print("\nGoogle Calendar's import page is open.")
+        print(f'Drag {path} into "Import", pick a calendar, hit Import.')
     print("\nRe-run this any time - events are keyed to usernames, so an import updates")
     print("existing birthdays instead of duplicating them.")
 
@@ -472,14 +610,21 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             print("\nCancelled.", file=sys.stderr)
             return 130
+        except Exception as exc:
+            # Anything Playwright raises past this point would otherwise end a documented
+            # command with a twelve-frame asyncio traceback. (SystemExit, which is how the
+            # expected failures are signalled, is not an Exception and still passes here.)
+            detail = next((line.strip() for line in str(exc).splitlines() if line.strip()),
+                          exc.__class__.__name__)
+            print(f"\n{detail}", file=sys.stderr)
+            return 1
 
     with_birthdays = [f for f in friends if f["month"] and f["day"]]
     if not with_birthdays:
         print(f"Found {len(friends)} friends but none had a birthday set.", file=sys.stderr)
         return 1
 
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(build_ics(with_birthdays, args.calname), encoding="utf-8")
+    write_private(args.out, build_ics(with_birthdays, args.calname))
 
     hidden = len(friends) - len(with_birthdays)
     print(f"\n{len(with_birthdays)} birthdays from {len(friends)} friends"

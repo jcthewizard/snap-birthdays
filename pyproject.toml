@@ -1,0 +1,55 @@
+[build-system]
+# 1.27 is the first release that understands the PEP 639 license fields below;
+# 1.26 builds but silently drops them, older versions fail outright.
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "snap-birthdays"
+version = "0.1.0"
+description = "Put your Snapchat friends' birthdays in your calendar"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Josh Chou" }]
+keywords = ["snapchat", "birthdays", "calendar", "ics", "icalendar"]
+classifiers = [
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "Operating System :: MacOS :: MacOS X",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Utilities",
+]
+# 1.49 is where `playwright install --no-shell` lands - see core.install_chromium.
+dependencies = ["playwright>=1.49"]
+
+# The source repository is private, so the sdist on PyPI is the source. No issue
+# tracker link for the same reason - there is nothing public to point at.
+[project.urls]
+Homepage = "https://pypi.org/project/snap-birthdays/"
+Source = "https://pypi.org/project/snap-birthdays/#files"
+
+[project.scripts]
+snap-birthdays = "snap_birthdays.ui:main"
+snap-birthdays-cli = "snap_birthdays.core:main"
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+# ui.html lives inside the package so the wheel carries it. Without this the UI would
+# install fine and then 500 on the first request, which is invisible until someone
+# other than you installs it.
+[tool.hatch.build.targets.wheel]
+packages = ["snap_birthdays"]
+
+[tool.hatch.build.targets.sdist]
+include = ["snap_birthdays", "tests", "README.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

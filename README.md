@@ -1,6 +1,6 @@
 # snap-birthdays
 
-Put your Snapchat friends' birthdays in your calendar. One file, one dependency.
+Put your Snapchat friends' birthdays in your calendar.
 
 Snapchat has no API for this, but its web app fetches every friend's birthday in a single
 response when it loads. So this opens a real browser, lets you log in by hand, reads that
@@ -8,42 +8,53 @@ one response as it goes past, and writes an `.ics` file.
 
 ```
 427 birthdays from 564 friends (137 keep theirs private)
-Wrote /Users/you/.snap-birthdays/snapchat-birthdays.ics
 ```
 
-## Setup
+## Run it
 
 ```bash
-pip install playwright && playwright install chromium
+uvx snap-birthdays
 ```
 
-## Use
+That's the whole thing. ([Don't have `uv`?](https://docs.astral.sh/uv/getting-started/installation/)
+Or use `pipx run snap-birthdays`, or `pip install snap-birthdays && snap-birthdays`.)
 
-```bash
-python ui.py
+A page opens in your browser with four steps — connect Snapchat, pick Apple or Google
+Calendar, tick the people you want, import. Your selection is remembered, so the next
+run starts where you left off, and anyone who adds you on Snapchat later shows up
+already ticked.
+
+```
+  1  Connect Snapchat        564 friends, 427 share a birthday
+  2  Choose a calendar       [ Apple Calendar ]  [ Google Calendar ]
+  3  Pick who to include     search, All / None, grouped by month
+                                                   [ Add to calendar ]
 ```
 
-That's the whole thing: it opens a page in your browser with four steps — connect
-Snapchat, pick Apple or Google Calendar, tick the people you want, import. Your
-selection is remembered, so the next run starts where you left off, and anyone who
-adds you on Snapchat later shows up already ticked.
+<!-- No screenshot here on purpose: this file is also the PyPI description, and PyPI
+     will not render a relative image path. The real screenshot is docs/ui.png. -->
 
-<img src="docs/ui.png" alt="The snap-birthdays window" width="620">
+Nothing leaves your machine. The page is served from `127.0.0.1` on a random port with a
+random token, and stops when you press Ctrl-C. Your Snapchat login happens in a real
+browser window that only you touch; the session lives in `~/.snap-birthdays/` and is
+never transmitted anywhere.
 
-The server is local-only (`127.0.0.1`, random port, random token per run) and stops
-when you press Ctrl-C.
+**On the very first run** it downloads a browser for Playwright (~170MB, ~350MB on disk,
+once) unless you already have Google Chrome installed, in which case it just uses that.
+The download runs before the browser window appears, and its progress is printed in the
+terminal you started this from, not in the page.
 
 ### Or from the terminal
 
 ```bash
-python snapbirthdays.py                 # fetch, then open the file in Calendar (macOS)
-python snapbirthdays.py --to google     # ...or open Google Calendar's import page
-python snapbirthdays.py --to file       # ...or just write the .ics and stop
+snap-birthdays-cli                 # fetch, then open the file in Calendar (macOS)
+snap-birthdays-cli --to google     # ...or open Google Calendar's import page
+snap-birthdays-cli --to file       # ...or just write the .ics and stop
 ```
 
-A browser window opens. Log in if it asks; after the first time the session is remembered
-in `~/.snap-birthdays/chrome-profile`, so later runs need nothing from you. Once the
-friend data goes past, the window closes on its own.
+A browser window opens. Log in if it asks; after the first time the session is remembered,
+so later runs need nothing from you. Once the friend data goes past, the window closes on
+its own.
 
 ### Apple Calendar
 
@@ -53,9 +64,12 @@ lot in one action later.
 
 ### Google Calendar
 
-`--to google` opens the import page and selects the `.ics` in Finder. Drag it in, pick a
-calendar, hit Import. There's no way to automate this without OAuth credentials and a
-Google Cloud project, which is a lot of machinery for something you'll run twice a year.
+Opens the import page and hands you the `.ics`. Drag it in, pick a calendar, hit Import.
+There's no way to automate this without OAuth credentials and a Google Cloud project,
+which is a lot of machinery for something you'll run twice a year.
+
+Works on macOS, Linux and Windows. Apple Calendar is macOS-only for obvious reasons; on
+anything else the tool says so and leaves you the file.
 
 ### Options
 
@@ -91,20 +105,31 @@ years in most calendar apps, which is not what you want.
 **It runs headed, always.** Snapchat doesn't issue the friend sync in a headless browser,
 so there'd be nothing to capture. A `--headless` flag would just hang.
 
-**It's against Snapchat's terms of service.** It's your own account reading your own
-friends' birthdays, so the legal exposure is somewhere around nil, but automating a
-logged-in session is not something they permit. Don't put it on a cron; run it when you
+**It's against Snapchat's terms of service.** Automating a logged-in session is not
+something they permit, even when it's your own account reading your own friends'
+birthdays. Realistically the risk is your account getting rate-limited or flagged, not a
+lawyer — but it is your account and your call. Don't put it on a cron; run it when you
 actually want your calendar updated.
 
-## Tests
+**Those birthdays belong to other people.** Several hundred of them, none of whom were
+asked. Keep the file to yourself — `~/.snap-birthdays/` is created readable only by you,
+and the `.ics` is written the same way.
+
+## The source, and the tests
+
+There is no public repository. The sdist on PyPI *is* the source — same files, tests
+included:
 
 ```bash
-python3 -m pytest
+pip download --no-binary :all: --no-deps snap-birthdays
+tar xf snap_birthdays-*.tar.gz && cd snap_birthdays-*
+uv sync --group dev && uv run pytest
 ```
 
-68 tests, no network and no browser — the protobuf decoder runs against synthetic
-payloads, the calendar writer against hand-built friends, and the UI's API surface
-against a real server on a random port.
+93 tests, no network and no browser — the protobuf decoder runs against synthetic
+payloads, the calendar writer against hand-built friends, delivery against all three
+platforms, the browser launch against a stub, and the UI's API surface against a real
+server on a random port.
 
 ## Credit
 

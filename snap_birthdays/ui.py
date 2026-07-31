@@ -3,10 +3,10 @@
 
 Run it:
 
-    python ui.py
+    snap-birthdays
 
 It serves a page on 127.0.0.1, opens your browser, and gets out of the way. All the
-real work still happens in snapbirthdays.py - this is only a front door.
+real work still happens in core.py - this is only a front door.
 
 Why a web page rather than a desktop window: the interesting part of the UI is a list of
 several hundred people with checkboxes and a search box, which HTML does well and Tk does
@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import secrets
 import subprocess
 import sys
@@ -29,7 +28,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-import snapbirthdays as core
+from . import core
 
 HERE = Path(__file__).resolve().parent
 CACHE = core.HOME / "friends.json"
@@ -41,6 +40,14 @@ TOKEN = secrets.token_urlsafe(16)
 
 #: One writer at a time, so two requests can't interleave a cache rewrite.
 LOCK = threading.Lock()
+
+#: Shown to anyone who reaches the port without the token - usually the user typing the
+#: bare address after losing the tab, so say what to do instead of "bad token".
+NO_TOKEN = (
+    "snap-birthdays is running, but this address is missing its access token.\n"
+    "Open the http://127.0.0.1:.../?token=... link printed in the terminal you\n"
+    "started it from.\n"
+)
 
 MONTHS = ["", "January", "February", "March", "April", "May", "June",
           "July", "August", "September", "October", "November", "December"]
@@ -56,16 +63,13 @@ def empty_cache() -> dict:
 
 
 def write_atomic(path: Path, text: str) -> None:
-    """Write via a temp file and rename.
+    """Atomic, owner-only write (see ``core.write_private``), one writer at a time.
 
-    A plain write truncates first, so a crash, a Ctrl-C or a concurrent read during it
-    leaves an empty or half-written file. Renaming over the old one never does.
+    The lock matters here and not in the CLI: two requests can be in flight at once, and
+    they would otherwise share the one temp file.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
     with LOCK:
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, path)
+        core.write_private(path, text)
 
 
 def load_cache() -> dict:
@@ -241,17 +245,20 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         query = parse_qs(url.query)
 
+        # The page carries the token, so it has to be behind the token too - otherwise
+        # any other local process can read it off the page and then read your friends.
+        if not self._authorised(query):
+            if url.path == "/":
+                self._send(403, NO_TOKEN.encode("utf-8"), "text/plain; charset=utf-8")
+            else:
+                self._json({"error": "bad token"}, 403)
+            return
+
         if url.path == "/":
             html = (HERE / "ui.html").read_text(encoding="utf-8")
             html = html.replace("__TOKEN__", TOKEN)
             self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
-            return
-
-        if not self._authorised(query):
-            self._json({"error": "bad token"}, 403)
-            return
-
-        if url.path == "/api/state":
+        elif url.path == "/api/state":
             self._json(cache_payload())
         elif url.path == "/download":
             try:
